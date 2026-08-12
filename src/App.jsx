@@ -724,6 +724,13 @@ export default function App() {
     [matches]
   );
 
+  // Public-facing match list. Badge? = FALSE matches still replay into the
+  // real ladder, but are intentionally invisible in records/history/streaks.
+  const publicMatches = useMemo(
+    () => sortedMatches.filter((m) => !m._badgeSuppressed),
+    [sortedMatches]
+  );
+
   const playerStats = useMemo(() => {
     const map = new Map();
     players.forEach((p) =>
@@ -743,7 +750,7 @@ export default function App() {
       })
     );
 
-    sortedMatches.forEach((m) => {
+    publicMatches.forEach((m) => {
       const w = map.get(m.winner_id);
       const l = map.get(m.loser_id);
 
@@ -775,7 +782,7 @@ export default function App() {
     });
 
     return map;
-  }, [players, sortedMatches, nowData.eventLog]);
+  }, [players, publicMatches, nowData.eventLog]);
 
   // One activity item per match/event type, aggregating every ladder affected by that win.
   const rankActivity = useMemo(() => {
@@ -991,7 +998,7 @@ export default function App() {
           </div>
           <div style={statCard}>
             <div style={{ fontSize: 11, opacity: 0.62, textTransform: "uppercase", letterSpacing: 1 }}>Recorded matches</div>
-            <div style={{ fontSize: 24, fontWeight: 900, marginTop: 2 }}>{sortedMatches.length}</div>
+            <div style={{ fontSize: 24, fontWeight: 900, marginTop: 2 }}>{publicMatches.length}</div>
           </div>
           <div style={statCard}>
             <div style={{ fontSize: 11, opacity: 0.62, textTransform: "uppercase", letterSpacing: 1 }}>Last update</div>
