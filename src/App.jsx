@@ -254,6 +254,11 @@ function applyMatchToLadder(ladder, match) {
         winner_id: match.winner_id,
         loser_id: match.loser_id,
         jump,
+        // Everyone between the loser and winner is displaced down one internal place.
+        // Newcastle later filters inactive/injured competitors at display time, so the
+        // visible-movement calculation only counts displaced competitors who are
+        // actually visible in that particular ladder.
+        displaced_ids: ladder.slice(li, wi).map((p) => p.id),
       });
       return { ladder: out, events };
     }
@@ -271,7 +276,11 @@ function computeLaddersThroughDate(players, matches, displayClasses, cutoff) {
   const lastTakeoverMap = new Map();
   const lastDefenseMap = new Map();
   const lastLadderActivityMap = new Map();
+
+  // Only NON-suppressed matches are written to these visual logs.
+  // Badge? = FALSE still changes the real ladder, but leaves no movement UI trace.
   const eventLog = [];
+  const movementLog = [];
 
   const laddersForArm = (arm) =>
     Object.keys(ladders).filter((wc) => wc.endsWith(` ${arm}`));
@@ -312,7 +321,15 @@ function computeLaddersThroughDate(players, matches, displayClasses, cutoff) {
         ladders[wc] = newLadder;
 
         events.forEach((e) => {
-          // Log all real ladder events, even when the visual badge is suppressed.
+          /*
+           * Badge? = FALSE is a COMPLETE VISUAL SUPPRESSION flag.
+           * The ladder change above has already been applied, so the real ranking
+           * remains correct. From this point onward, however, a suppressed match
+           * must leave no visible movement trail: no badge, arrows, activity feed,
+           * takeover/defense stat, or "last activity" update.
+           */
+          if (m._badgeSuppressed) return;
+
           const logged = {
             ...e,
             wc,
@@ -325,18 +342,55 @@ function computeLaddersThroughDate(players, matches, displayClasses, cutoff) {
           eventLog.push(logged);
           lastLadderActivityMap.set(wc, when);
 
-          if (m._badgeSuppressed) return;
-
           const wk = `${wc}:${e.winner_id}`;
           if (e.type === "defense") {
             lastEventMap.set(wk, { type: "defense", when });
             lastDefenseMap.set(wk, when);
             lastJumpMap.delete(wk);
           }
+
           if (e.type === "takeover") {
             lastEventMap.set(wk, { type: "takeover", when });
             lastTakeoverMap.set(wk, when);
             lastJumpMap.set(wk, e.jump || 0);
+
+            /*
+             * Newcastle keeps inactive/injured competitors inside the internal
+             * historical ladder, but hides them in the displayed ladder.
+             * Therefore the arrow number must count only people who are currently
+             * visible in this class, otherwise a visible ↑3 could really be only
+             * one displayed place.
+             */
+            const displacedSet = new Set(e.displaced_ids || []);
+            const visiblyDisplaced = ladder.filter((p) => {
+              if (!displacedSet.has(p.id)) return false;
+              if (!p.active) return false;
+              if (m.arm === "Right" && p.injuredRight) return false;
+              if (m.arm === "Left" && p.injuredLeft) return false;
+              return true;
+            });
+
+            // Winner gains one visible position for each visible competitor passed.
+            if (visiblyDisplaced.length > 0) {
+              movementLog.push({
+                wc,
+                player_id: e.winner_id,
+                delta: visiblyDisplaced.length,
+                when,
+                matchKey: m._stableKey,
+              });
+            }
+
+            // Every visible competitor passed by the winner drops one displayed place.
+            visiblyDisplaced.forEach((p) => {
+              movementLog.push({
+                wc,
+                player_id: p.id,
+                delta: -1,
+                when,
+                matchKey: m._stableKey,
+              });
+            });
           }
         });
       }
@@ -357,6 +411,7 @@ function computeLaddersThroughDate(players, matches, displayClasses, cutoff) {
     lastDefenseMap,
     lastLadderActivityMap,
     eventLog,
+    movementLog,
   };
 }
 
@@ -621,14 +676,15 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedPlayerId]);
 
-  // Compute current ladders and the historical comparison window.
-  const { nowData, pastData, cutoff } = useMemo(() => {
+  // Compute the current ladders and the recent-visual window.
+  // Movement arrows are derived only from NON-suppressed movement events rather
+  // than raw rank snapshots, so Badge? = FALSE cannot create green/red arrows.
+  const { nowData, cutoff } = useMemo(() => {
     const cutoffDate = new Date();
     cutoffDate.setHours(0, 0, 0, 0);
     cutoffDate.setDate(cutoffDate.getDate() - (showBadges ? windowDays : 36500));
-    const past = computeLaddersThroughDate(players, matches, CONFIG.weightClasses, cutoffDate);
     const now = computeLaddersThroughDate(players, matches, CONFIG.weightClasses, null);
-    return { nowData: now, pastData: past, cutoff: cutoffDate };
+    return { nowData: now, cutoff: cutoffDate };
   }, [players, matches, windowDays, showBadges]);
 
   const playerById = useMemo(
@@ -750,6 +806,22 @@ export default function App() {
         return (b.rowIndex ?? 0) - (a.rowIndex ?? 0);
       });
   }, [nowData.eventLog]);
+
+  // Net VISIBLE rank movement inside the selected recent window.
+  // Suppressed matches never enter movementLog, so they can change the actual
+  // rankings without creating either green upward or red downward arrows.
+  const recentVisibleMovement = useMemo(() => {
+    const map = new Map();
+    if (!showBadges) return map;
+
+    (nowData.movementLog || []).forEach((move) => {
+      if (!move.when || move.when < cutoff) return;
+      const key = `${move.wc}:${move.player_id}`;
+      map.set(key, (map.get(key) || 0) + (move.delta || 0));
+    });
+
+    return map;
+  }, [nowData.movementLog, cutoff, showBadges]);
 
   const visibleClasses = useMemo(
     () =>
@@ -1061,13 +1133,10 @@ export default function App() {
             // Newcastle preserves everyone internally for history, then filters only
             // at display time so inactive/injured members do not leave rank gaps.
             const fullNow = nowData.ladders[wc] || [];
-            const fullPast = pastData.ladders[wc] || [];
             const displayNow = currentDisplayLadder(wc, fullNow);
-            const displayPast = currentDisplayLadder(wc, fullPast);
             const filtered = searchLower
               ? displayNow.filter((p) => p.name.toLowerCase().includes(searchLower))
               : displayNow.slice(0, limitFor(wc));
-            const pastRank = new Map(displayPast.map((p) => [p.id, p.rank]));
             const champion = displayNow[0];
             const champPhoto = champion ? photoForPlayer(champion.id) : "";
             const lastActivity = nowData.lastLadderActivityMap.get(wc) || null;
@@ -1114,15 +1183,13 @@ export default function App() {
                     </div>
                   ) : (
                     filtered.map((p) => {
-                      const was = pastRank.get(p.id);
-                      const delta = was ? was - p.rank : 0;
                       const key = `${wc}:${p.id}`;
+                      const movement = recentVisibleMovement.get(key) || 0;
                       const takeoverWhen = nowData.lastTakeoverMap.get(key) || null;
                       const defenseWhen = nowData.lastDefenseMap.get(key) || null;
                       const isRecentTakeover = Boolean(showBadges && takeoverWhen && takeoverWhen >= cutoff);
                       const isRecentDefense = Boolean(showBadges && defenseWhen && defenseWhen >= cutoff);
-                      const recent = isRecentTakeover || isRecentDefense;
-                      const jump = nowData.lastJumpMap.get(key) ?? 0;
+                      const recent = isRecentTakeover || isRecentDefense || movement !== 0;
 
                       return (
                         <div
@@ -1141,11 +1208,11 @@ export default function App() {
                               <span style={{ fontWeight: 820, letterSpacing: 0.1, overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</span>
                               {isRecentTakeover && <span title="Took rank" style={{ color: gold }}>★</span>}
                               {isRecentDefense && <span title="Defended">🛡️</span>}
-                              {showBadges && delta > 0 && (
-                                <span title={`Up ${delta} in selected window`} style={{ color: green, fontSize: 11, fontWeight: 900 }}>↑ {jump > 0 ? jump : delta}</span>
+                              {showBadges && movement > 0 && (
+                                <span title={`Up ${movement} from visible ranking matches in selected window`} style={{ color: green, fontSize: 11, fontWeight: 900 }}>↑ {movement}</span>
                               )}
-                              {showBadges && delta < 0 && (
-                                <span title={`Down ${Math.abs(delta)} in selected window`} style={{ color: red, fontSize: 11, fontWeight: 850 }}>↓ {Math.abs(delta)}</span>
+                              {showBadges && movement < 0 && (
+                                <span title={`Down ${Math.abs(movement)} from visible ranking matches in selected window`} style={{ color: red, fontSize: 11, fontWeight: 850 }}>↓ {Math.abs(movement)}</span>
                               )}
                             </div>
                             <div style={{ fontSize: 10.5, opacity: 0.52, marginTop: 2 }}>Base · {prettyBaseLabel(p.weight_class)}</div>
