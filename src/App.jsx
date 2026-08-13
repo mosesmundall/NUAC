@@ -56,7 +56,8 @@ const CONFIG = {
 
   validation: {
     allowedPlayerWeightClasses: ["women", "woman", "u60kg", "u75kg", "u85kg", "open"],
-    dateHelp: 'Use DD/MM/YYYY for all new data. The validator flags dates that are clearly MM/DD/YYYY, but an ambiguous date such as 07/05/2025 cannot be automatically distinguished.',
+    dateHelp: 'NUAC migration rule: historical ambiguous dates before 01/08/2026 are read as legacy MM/DD/YYYY. Dates from 01/08/2026 onward are read as DD/MM/YYYY. Unambiguous dates are accepted automatically.',
+    auDateCutoverUtc: Date.UTC(2026, 7, 1), // 01/08/2026 UTC
   },
 
   defaultWindowDays: 30,
@@ -100,12 +101,27 @@ const gv = (obj, ...keys) => {
   return "";
 };
 
-/* Newcastle legacy date parser.
- * AU D/M/YYYY is preferred, but unambiguous M/D/YYYY rows are still accepted
- * so older Newcastle history remains compatible.
+/* Newcastle mixed-history date parser.
+ *
+ * NUAC historically stored dates as US MM/DD/YYYY. From 01/08/2026 onward,
+ * new entries use Australian DD/MM/YYYY. For slash dates where both readings
+ * are possible, the migration cutover resolves the ambiguity:
+ *   - both candidate dates before the cutover -> legacy US (MM/DD/YYYY)
+ *   - both candidate dates on/after the cutover -> new AU (DD/MM/YYYY)
+ *   - one candidate on each side -> choose the candidate that belongs to the
+ *     appropriate era (the post-cutover candidate for new-format data).
+ *
+ * Unambiguous slash dates and ISO YYYY-MM-DD are always accepted directly.
  */
-function parseDateTimeUTC(s, opts = {}) {
-  const preferDMY = opts.preferDMY ?? true;
+function validUtcDate(y, mo, d, hh = 12, mi = 0, ss = 0) {
+  if (mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const out = new Date(Date.UTC(y, mo - 1, d, hh, mi, ss));
+  return out.getUTCFullYear() === y && out.getUTCMonth() === mo - 1 && out.getUTCDate() === d
+    ? out
+    : null;
+}
+
+function parseDateTimeUTC(s) {
   const t = String(s || "").trim();
   if (!t) return null;
 
@@ -114,31 +130,46 @@ function parseDateTimeUTC(s, opts = {}) {
     /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2})(?::(\d{1,2})(?::(\d{1,2}))?)?)?$/.exec(t);
   if (m) {
     const [, y, mo, d, hh = "12", mi = "0", ss = "0"] = m;
-    return new Date(Date.UTC(+y, +mo - 1, +d, +hh, +mi, +ss));
+    return validUtcDate(+y, +mo, +d, +hh, +mi, +ss);
   }
 
-  // Slash dates: D/M/Y or M/D/Y. Ambiguous dates default to Australian D/M/Y.
+  // Slash dates: either DD/MM/YYYY or MM/DD/YYYY.
   m =
     /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[ T](\d{1,2})(?::(\d{1,2})(?::(\d{1,2}))?)?)?$/.exec(t);
-  if (m) {
-    const a = +m[1],
-      b = +m[2],
-      y = +m[3];
-    const hh = +(m[4] ?? 12),
-      mi = +(m[5] ?? 0),
-      ss = +(m[6] ?? 0);
+  if (!m) return null;
 
-    // Unambiguous formats.
-    if (a > 12 && b <= 12) return new Date(Date.UTC(y, b - 1, a, hh, mi, ss)); // D/M
-    if (b > 12 && a <= 12) return new Date(Date.UTC(y, a - 1, b, hh, mi, ss)); // M/D
+  const a = +m[1];
+  const b = +m[2];
+  const y = +m[3];
+  const hh = +(m[4] ?? 12);
+  const mi = +(m[5] ?? 0);
+  const ss = +(m[6] ?? 0);
 
-    // Ambiguous -> deterministic AU-first interpretation.
-    const d = preferDMY ? a : b;
-    const mo = preferDMY ? b : a;
-    return new Date(Date.UTC(y, mo - 1, d, hh, mi, ss));
-  }
+  const dmy = validUtcDate(y, b, a, hh, mi, ss);
+  const mdy = validUtcDate(y, a, b, hh, mi, ss);
 
-  return null;
+  // Only one interpretation is a real date -> no ambiguity.
+  if (dmy && !mdy) return dmy;
+  if (mdy && !dmy) return mdy;
+  if (!dmy && !mdy) return null;
+
+  // Same numerical date (e.g. 05/05/2026).
+  if (dmy.getTime() === mdy.getTime()) return dmy;
+
+  const cutover = CONFIG.validation?.auDateCutoverUtc ?? Date.UTC(2026, 7, 1);
+  const dmyPostCutover = dmy.getTime() >= cutover;
+  const mdyPostCutover = mdy.getTime() >= cutover;
+
+  // If the interpretations fall on opposite sides of the migration date,
+  // choose the post-cutover candidate. That is the only candidate consistent
+  // with a new AU-format entry after the migration.
+  if (dmyPostCutover !== mdyPostCutover) return dmyPostCutover ? dmy : mdy;
+
+  // Both historical -> old NUAC convention was US MM/DD/YYYY.
+  if (!dmyPostCutover && !mdyPostCutover) return mdy;
+
+  // Both on/after migration -> new NUAC convention is AU DD/MM/YYYY.
+  return dmy;
 }
 
 /* Parse "Injured?" column: RIGHT/LEFT (also R/L, BOTH, or comma lists) */
@@ -534,43 +565,30 @@ function closestPlayerId(value, validIds) {
 
 function strictDateInfo(value) {
   const t = trim(value);
-  if (!t) return { parsed: null, valid: false, format: "missing", inconsistent: false };
+  if (!t) return { parsed: null, valid: false, format: "missing", ambiguous: false };
 
   const slash = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(t);
   if (slash) {
     const a = +slash[1];
     const b = +slash[2];
     const y = +slash[3];
-    let d;
-    let mo;
-    let inconsistent = false;
+    const dmy = validUtcDate(y, b, a);
+    const mdy = validUtcDate(y, a, b);
+    const parsed = parseDateTimeUTC(t);
+    const ambiguous = Boolean(dmy && mdy && dmy.getTime() !== mdy.getTime());
 
-    if (a > 12 && b <= 12) {
-      d = a;
-      mo = b;
-    } else if (b > 12 && a <= 12) {
-      // This can only be MM/DD/YYYY, so it is inconsistent with our DD/MM/YYYY standard.
-      d = b;
-      mo = a;
-      inconsistent = true;
-    } else {
-      // Ambiguous values are interpreted as DD/MM/YYYY by the ranking code.
-      d = a;
-      mo = b;
-    }
-
-    if (mo < 1 || mo > 12 || d < 1 || d > 31) {
-      return { parsed: null, valid: false, format: "slash", inconsistent };
-    }
-    const ms = Date.UTC(y, mo - 1, d, 12, 0, 0);
-    const parsed = new Date(ms);
-    const valid = parsed.getUTCFullYear() === y && parsed.getUTCMonth() === mo - 1 && parsed.getUTCDate() === d;
-    return { parsed: valid ? parsed : null, valid, format: "slash", inconsistent };
+    return {
+      parsed,
+      valid: Boolean(parsed),
+      format: "slash",
+      ambiguous,
+    };
   }
 
-  // The ranking parser may support legacy/ISO values, but the admin standard is DD/MM/YYYY.
-  const parsed = parseDateTimeUTC(t);
-  return { parsed, valid: Boolean(parsed), format: "other", inconsistent: true };
+  // ISO is also accepted. Anything else is invalid.
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.test(t);
+  const parsed = iso ? parseDateTimeUTC(t) : null;
+  return { parsed, valid: Boolean(parsed), format: iso ? "iso" : "other", ambiguous: false };
 }
 
 function validateClubData(playerRows, matchRows) {
@@ -663,15 +681,14 @@ function validateClubData(playerRows, matchRows) {
     const rawArm = trim(gv(r, "arm?", "arm"));
 
     if (!date) {
-      add("error", "Matches", row, "DATE", "Missing match date", "", "Enter the date as DD/MM/YYYY.");
+      add("error", "Matches", row, "DATE", "Missing match date", "", "Enter a match date. New entries should use DD/MM/YYYY.");
     } else {
       const info = strictDateInfo(date);
       if (!info.valid) {
-        add("error", "Matches", row, "DATE", "Invalid date", date, "Enter a real calendar date as DD/MM/YYYY.");
+        add("error", "Matches", row, "DATE", "Invalid date", date, "Enter a real calendar date. New entries should use DD/MM/YYYY.");
       } else {
-        if (info.inconsistent) {
-          add("error", "Matches", row, "DATE", "Inconsistent date format", date, "Convert this row to DD/MM/YYYY.");
-        }
+        // Ambiguous legacy/new slash dates are intentionally resolved by the NUAC
+        // 01/08/2026 migration rule rather than generating hundreds of false errors.
         const dayUtc = Date.UTC(info.parsed.getUTCFullYear(), info.parsed.getUTCMonth(), info.parsed.getUTCDate());
         if (dayUtc > todayUtc) {
           add("error", "Matches", row, "DATE", "Future-dated match", date, "Correct the date, or wait until that date before entering the match as a completed result.");
@@ -1476,7 +1493,7 @@ export default function App() {
 
         {invalidDateCount > 0 && (
           <div style={{ ...glass, borderRadius: 14, padding: 12, marginBottom: 14, borderColor: "rgba(251,191,36,.4)", color: "#fde68a" }}>
-            {invalidDateCount} match {invalidDateCount === 1 ? "row has" : "rows have"} an invalid date and {invalidDateCount === 1 ? "is" : "are"} being ignored. Use DD/MM/YYYY for new rows.
+            {invalidDateCount} match {invalidDateCount === 1 ? "row has" : "rows have"} an invalid date and {invalidDateCount === 1 ? "is" : "are"} being ignored. New rows should use DD/MM/YYYY.
           </div>
         )}
 
