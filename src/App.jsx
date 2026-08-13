@@ -39,7 +39,7 @@ const CONFIG = {
   },
   photos: {
     byPlayerId: {
-      // keys MUST match the player IDs in your Players sheet
+      // keys MUST match the player IDs in your Competitor sheet
       aden_w: "/aden_champ.png",
       tristan_c: "/tristan_champ.png",
       wesley_h: "/wesley_champ.png",
@@ -680,17 +680,17 @@ function validateClubData(playerRows, matchRows) {
     }
 
     if (!winner) {
-      add("error", "Matches", row, "Winner ID", "Missing Winner ID", "", "Enter the exact Player ID from the Players sheet.");
+      add("error", "Matches", row, "Winner ID", "Missing Winner ID", "", "Enter the exact Competitor ID from the Competitor sheet.");
     } else if (!validIdSet.has(winner)) {
       const suggestion = closestPlayerId(winner, uniqueValidIds);
-      add("error", "Matches", row, "Winner ID", "Winner ID not found in Players sheet", winner, suggestion ? `Possible match: ${suggestion}` : "Use an exact Player ID from the Players sheet.");
+      add("error", "Matches", row, "Winner ID", "Winner ID not found in Competitor sheet", winner, suggestion ? `Possible match: ${suggestion}` : "Use an exact Competitor ID from the Competitor sheet.");
     }
 
     if (!loser) {
-      add("error", "Matches", row, "Looser ID", "Missing Loser ID", "", "Enter the exact Player ID from the Players sheet.");
+      add("error", "Matches", row, "Looser ID", "Missing Loser ID", "", "Enter the exact Competitor ID from the Competitor sheet.");
     } else if (!validIdSet.has(loser)) {
       const suggestion = closestPlayerId(loser, uniqueValidIds);
-      add("error", "Matches", row, "Looser ID", "Loser ID not found in Players sheet", loser, suggestion ? `Possible match: ${suggestion}` : "Use an exact Player ID from the Players sheet.");
+      add("error", "Matches", row, "Looser ID", "Loser ID not found in Competitor sheet", loser, suggestion ? `Possible match: ${suggestion}` : "Use an exact Competitor ID from the Competitor sheet.");
     }
 
     if (winner && loser && winner === loser) {
@@ -728,7 +728,7 @@ function validateClubData(playerRows, matchRows) {
         "CONFIG.photos.byPlayerId",
         "Photo mapping does not match a Player ID",
         photoId,
-        "Either correct the photo mapping key or add the matching Player ID to the Players sheet.",
+        "Either correct the photo mapping key or add the matching Competitor ID to the Competitor sheet.",
         { codeLocation: `CONFIG.photos.byPlayerId.${photoId}` }
       );
     }
@@ -1315,7 +1315,7 @@ export default function App() {
               <div style={{ fontSize:27, fontWeight:950, marginTop:2, color:dataHealthCounts.warnings ? "#fde68a" : green }}>● {dataHealthCounts.warnings}</div>
             </div>
             <div style={statCard}>
-              <div style={{ fontSize:11, opacity:.62, textTransform:"uppercase", letterSpacing:1 }}>Players checked</div>
+              <div style={{ fontSize:11, opacity:.62, textTransform:"uppercase", letterSpacing:1 }}>Competitors checked</div>
               <div style={{ fontSize:27, fontWeight:950, marginTop:2 }}>{dataHealthMeta.playerRows}</div>
             </div>
             <div style={statCard}>
@@ -1356,7 +1356,7 @@ export default function App() {
                 const sheetKey = issue.source === "Players" ? "players" : issue.source === "Matches" ? "matches" : null;
                 const location = issue.source === "Code"
                   ? (issue.codeLocation || issue.field)
-                  : `${issue.source} sheet · Row ${issue.row}`;
+                  : `${issue.source === "Players" ? "Competitor sheet" : "Match sheet"} · Row ${issue.row}`;
                 return (
                   <div className="issue-card" key={issue.id} style={{ borderColor:isError ? "rgba(251,113,133,.32)" : "rgba(251,191,36,.28)" }}>
                     <div style={{ display:"flex", justifyContent:"space-between", gap:12, flexWrap:"wrap" }}>
