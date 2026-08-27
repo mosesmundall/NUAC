@@ -485,7 +485,7 @@ function currentDisplayLadder(wc, ladder) {
 }
 
 function limitFor(wc) {
-  return String(wc || "").startsWith("Open") ? 15 : 10;
+  return 10;
 }
 
 function formatDateAU(date) {
