@@ -2609,19 +2609,19 @@ export default function App() {
 
         .rank-shell.display-mode .topbar {
           flex:0 0 auto;
-          min-height:42px;
-          margin-bottom:7px;
-          gap:9px;
+          min-height:46px;
+          margin-bottom:8px;
+          gap:10px;
           flex-wrap:nowrap;
         }
         .rank-shell.display-mode .topbar h1 {
-          font-size:clamp(18px,1.35vw,25px)!important;
+          font-size:clamp(20px,1.5vw,28px)!important;
           white-space:nowrap;
         }
         .rank-shell.display-mode .brand-logo {
-          width:42px;
-          height:42px;
-          border-radius:11px;
+          width:46px;
+          height:46px;
+          border-radius:12px;
         }
 
         .rank-shell.display-mode .rank-grid {
@@ -2636,22 +2636,42 @@ export default function App() {
         }
 
 
+        /*
+         * Newcastle has exactly eight ladders, so 4 × 2 is already the efficient
+         * shape. Use its extra vertical room for larger, projector-readable rows.
+         */
         .rank-shell.theme-newcastle.display-mode .rank-grid {
           grid-template-columns:repeat(4,minmax(0,1fr));
           grid-template-rows:repeat(2,minmax(0,1fr));
+          gap:10px;
         }
         .rank-shell.theme-newcastle.display-mode .rank-row {
-          min-height:25px;
-          padding:3px 6px;
-          gap:7px;
-          font-size:clamp(10px,.72vw,13px);
+          min-height:clamp(22px,3.05vh,36px);
+          padding:clamp(3px,.48vh,6px) 9px;
+          gap:9px;
+          font-size:clamp(11px,1.48vh,17px);
+          letter-spacing:.03px;
         }
         .rank-shell.theme-newcastle.display-mode .rank-num {
-          width:23px;
-          height:23px;
-          flex-basis:23px;
-          border-radius:7px;
-          font-size:10.5px;
+          width:clamp(23px,2.8vh,33px);
+          height:clamp(23px,2.8vh,33px);
+          flex-basis:clamp(23px,2.8vh,33px);
+          border-radius:8px;
+          font-size:clamp(10px,1.22vh,14px);
+        }
+        .rank-shell.theme-newcastle.display-mode .rank-card-header {
+          padding:clamp(7px,1vh,11px) 11px!important;
+        }
+        .rank-shell.theme-newcastle.display-mode .rank-card-title {
+          font-size:clamp(12px,1.55vh,18px)!important;
+          line-height:1.08;
+        }
+        .rank-shell.theme-newcastle.display-mode .rank-card-body {
+          padding:5px 8px!important;
+        }
+        .rank-shell.theme-newcastle.display-mode .champ-photo {
+          width:clamp(32px,4vh,46px);
+          height:clamp(32px,4vh,46px);
         }
         
 
@@ -2707,8 +2727,8 @@ export default function App() {
           display:none;
         }
         .rank-shell.display-mode .champ-photo {
-          width:28px;
-          height:28px;
+          width:30px;
+          height:30px;
           border-width:1px;
           box-shadow:0 0 0 2px rgba(245,197,66,.08),0 4px 12px rgba(0,0,0,.25);
         }
@@ -2726,6 +2746,51 @@ export default function App() {
           transition:opacity .18s ease;
         }
         .rank-shell.display-mode .display-mode-toggle:hover { opacity:1; }
+
+        @media (max-height:760px) {
+          .rank-shell.display-mode .topbar {
+            min-height:38px;
+            margin-bottom:5px;
+          }
+          .rank-shell.display-mode .brand-logo {
+            width:38px;
+            height:38px;
+          }
+          .rank-shell.display-mode .topbar h1 {
+            font-size:clamp(17px,1.35vw,23px)!important;
+          }
+
+          .rank-shell.theme-sydney.display-mode .rank-row {
+            min-height:12px;
+            font-size:clamp(8px,1.12vh,10.5px);
+            padding:1px 5px;
+          }
+          .rank-shell.theme-sydney.display-mode .rank-num {
+            width:13px;
+            height:13px;
+            flex-basis:13px;
+            font-size:8px;
+          }
+          .rank-shell.theme-sydney.display-mode .champ-photo {
+            width:24px;
+            height:24px;
+          }
+
+          .rank-shell.theme-newcastle.display-mode .rank-row {
+            min-height:21px;
+            font-size:clamp(10px,1.42vh,13px);
+            padding:3px 8px;
+          }
+          .rank-shell.theme-newcastle.display-mode .rank-num {
+            width:22px;
+            height:22px;
+            flex-basis:22px;
+          }
+          .rank-shell.theme-newcastle.display-mode .champ-photo {
+            width:30px;
+            height:30px;
+          }
+        }
 
         /* Stage 1: result card appears while the whole board darkens. */
         .rank-shell.display-mode.presentation-announcement .rank-grid {
