@@ -34,7 +34,7 @@ const CONFIG = {
   branding: {
     clubName: "NUAC Armwrestling Club",
     logoUrl: "/logo-nobg.png",
-    backgroundImage: "/background.jpg",
+    backgroundImage: "/background.png",
     subtitle: "Live Newcastle ranks • Check out competitor profiles",
   },
   photos: {
